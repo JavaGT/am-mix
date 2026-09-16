@@ -9,8 +9,9 @@ const { addToQueue, lastQueueError } = useDownloadManager();
 
 const query = ref('');
 
-// Hosts the queue error snackbar: this bar is always mounted once the app is
-// initialized, which is the only state in which addToQueue can fail.
+// Hosts the queue error snackbar: this bar is mounted on every app view after
+// startup (AppBar renders once initialization succeeds). /setup mounts its own
+// shell without this bar and has no addToQueue callers today.
 const isQueueErrorVisible = ref(false);
 const queueErrorMessage = ref('');
 

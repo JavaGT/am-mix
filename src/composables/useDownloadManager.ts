@@ -4,10 +4,9 @@ import { computed, ref } from "vue";
 const queue = ref<Map<string, any>>(new Map());
 
 // Set whenever addToQueue fails so a visible surface (e.g. the snackbar in
-// AppSearchBar) can report it; carries an id so repeated errors retrigger.
-const lastQueueError = ref<{ id: number; message: string } | null>(null);
-
-let queueErrorCounter = 0;
+// AppSearchBar) can report it. Each failure assigns a fresh object, so a
+// watcher re-fires even when the message is unchanged.
+const lastQueueError = ref<{ message: string } | null>(null);
 
 let isListening = false;
 let isInitialized = false;
@@ -67,7 +66,6 @@ export const useDownloadManager = () => {
     } catch (error) {
       console.error(`Failed to add ${url} to the download queue:`, error);
       lastQueueError.value = {
-        id: ++queueErrorCounter,
         message: `Failed to add to queue: ${url}`,
       };
     }
