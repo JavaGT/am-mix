@@ -102,6 +102,13 @@ class DownloadManager:
         serialized = self._serialize_item(media_id)
 
         if not serialized:
+            # The item is gone from the queue (e.g. it was cancelled and the
+            # job's CancelledError handler notifies after the pop): only a
+            # delete event may be sent for it, otherwise the frontend would
+            # upsert a ghost row it cannot clear or retry.
+            if not delete:
+                return
+
             serialized = {
                 "media_id": media_id,
                 "status": None,
