@@ -3,6 +3,11 @@ import { computed, ref } from "vue";
 
 const queue = ref<Map<string, any>>(new Map());
 
+// Set whenever addToQueue fails so a visible surface (e.g. the snackbar in
+// AppSearchBar) can report it. Each failure assigns a fresh object, so a
+// watcher re-fires even when the message is unchanged.
+const lastQueueError = ref<{ message: string } | null>(null);
+
 let isListening = false;
 let isInitialized = false;
 
@@ -53,8 +58,17 @@ export const useDownloadManager = () => {
     await rpc.call("initialize_download_manager");
   };
 
+  // Reports failures through lastQueueError instead of rejecting so every
+  // caller (single items and queue-whole-tab loops alike) surfaces them.
   const addToQueue = async (url: string) => {
-    await rpc.call("download_manager_add_to_queue", { url });
+    try {
+      await rpc.call("download_manager_add_to_queue", { url });
+    } catch (error) {
+      console.error(`Failed to add ${url} to the download queue:`, error);
+      lastQueueError.value = {
+        message: `Failed to add to queue: ${url}`,
+      };
+    }
   };
 
   const retryItem = async (itemId: string) => {
@@ -81,6 +95,7 @@ export const useDownloadManager = () => {
 
   return {
     queue,
+    lastQueueError,
     hasErrors,
     isActive,
     initialize,
