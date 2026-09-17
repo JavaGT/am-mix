@@ -29,6 +29,7 @@ export const usePlaylist = () => {
       playlistResult.value.loadingState = LoadingState.ERROR;
       playlistResult.value.errorMessage =
         error instanceof Error ? error.message : String(error);
+      return;
     }
 
     playlistResult.value.loadingState = LoadingState.SUCCESS;

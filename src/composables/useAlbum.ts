@@ -20,6 +20,7 @@ export const useAlbum = () => {
       albumResult.value.loadingState = LoadingState.ERROR;
       albumResult.value.errorMessage =
         error instanceof Error ? error.message : String(error);
+      return;
     }
 
     albumResult.value.loadingState = LoadingState.SUCCESS;

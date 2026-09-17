@@ -119,7 +119,49 @@ class CustomRpc(PyloidRPC):
 
         self._bind_methods(self.config_file, "config_file")
 
+    async def _close_api_clients(self, apis: tuple) -> None:
+        """Close the gamdl HTTP clients behind these API objects; the first
+        failure raises so a leaking client surfaces as a re-init error
+        instead of being swallowed."""
+        errors = []
+        for api in apis:
+            client = getattr(api, "client", None)
+            if client is None:
+                continue
+
+            try:
+                await client.aclose()
+            except Exception as e:
+                errors.append(f"closing an API client failed: {e}")
+
+        if errors:
+            raise RPCError(message="\n".join(errors))
+
+    async def _shutdown_stale_instances(self) -> None:
+        """Settings saves re-run the whole init chain; stop the previous
+        download manager and close the previous HTTP clients first so a save
+        cannot leave orphaned downloads running or leak one client per
+        save."""
+        download_manager = getattr(self, "download_manager", None)
+        if download_manager is not None:
+            try:
+                await download_manager.shutdown()
+            except Exception as e:
+                print(
+                    "[CustomRpc] Error shutting down previous download "
+                    f"manager: {e}"
+                )
+        self.download_manager = None
+
+        wrapper = getattr(self, "wrapper_api", None)
+        apple_music = getattr(self, "apple_music_api", None)
+        self.wrapper_api = None
+        self.apple_music_api = None
+        await self._close_api_clients((wrapper, apple_music))
+
     async def initialize_apple_music_api(self) -> None:
+        await self._shutdown_stale_instances()
+
         config = self.config_file.config
 
         try:
@@ -148,6 +190,14 @@ class CustomRpc(PyloidRPC):
                     storefront=None,
                 )
         except Exception as e:
+            try:
+                await self._close_api_clients(
+                    (self.wrapper_api, self.apple_music_api)
+                )
+            except Exception as cleanup_error:
+                print(f"[CustomRpc] {cleanup_error}")
+            self.wrapper_api = None
+            self.apple_music_api = None
             self._raise_rpc_error(e)
 
         self._bind_methods(
@@ -253,6 +303,10 @@ class CustomRpc(PyloidRPC):
                 print(f"[CustomRpc] Error invoking queue update: {e}")
 
     async def initialize_download_manager(self) -> None:
+        download_manager = getattr(self, "download_manager", None)
+        if download_manager is not None:
+            await download_manager.shutdown()
+
         self.download_manager = DownloadManager(
             downloader=self.apple_music_downloader,
             max_concurrent_tasks=self.config_file.config.max_concurrent_downloads,
