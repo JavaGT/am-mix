@@ -119,7 +119,28 @@ class CustomRpc(PyloidRPC):
 
         self._bind_methods(self.config_file, "config_file")
 
+    async def _close_stale_api_clients(self) -> None:
+        """Settings saves re-run initialization; close the previous HTTP
+        clients so each save does not leak a client and its connections."""
+        for api in (
+            getattr(self, "wrapper_api", None),
+            getattr(self, "apple_music_api", None),
+        ):
+            client = getattr(api, "client", None)
+            if client is None:
+                continue
+
+            try:
+                await client.aclose()
+            except Exception as e:
+                print(f"[CustomRpc] Error closing previous API client: {e}")
+
+        self.wrapper_api = None
+        self.apple_music_api = None
+
     async def initialize_apple_music_api(self) -> None:
+        await self._close_stale_api_clients()
+
         config = self.config_file.config
 
         try:
@@ -253,6 +274,10 @@ class CustomRpc(PyloidRPC):
                 print(f"[CustomRpc] Error invoking queue update: {e}")
 
     async def initialize_download_manager(self) -> None:
+        download_manager = getattr(self, "download_manager", None)
+        if download_manager is not None:
+            await download_manager.shutdown()
+
         self.download_manager = DownloadManager(
             downloader=self.apple_music_downloader,
             max_concurrent_tasks=self.config_file.config.max_concurrent_downloads,
