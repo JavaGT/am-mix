@@ -144,7 +144,13 @@ class CustomRpc(PyloidRPC):
         save."""
         download_manager = getattr(self, "download_manager", None)
         if download_manager is not None:
-            await download_manager.shutdown()
+            try:
+                await download_manager.shutdown()
+            except Exception as e:
+                print(
+                    "[CustomRpc] Error shutting down previous download "
+                    f"manager: {e}"
+                )
         self.download_manager = None
 
         wrapper = getattr(self, "wrapper_api", None)
