@@ -1,4 +1,5 @@
 import os
+import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -69,13 +70,22 @@ class ConfigFile:
         return self.config_path.exists()
 
     def save(self) -> None:
-        temp_path = self.config_path.with_name(self.config_path.name + ".tmp")
+        fd, temp_name = tempfile.mkstemp(
+            dir=self.config_path.parent,
+            prefix=self.config_path.name + ".",
+            suffix=".tmp",
+        )
         try:
-            with temp_path.open("w") as file:
+            with os.fdopen(fd, "w") as file:
                 yaml.dump(self.json_config, file)
-            os.replace(temp_path, self.config_path)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp_name, self.config_path)
         except BaseException:
-            temp_path.unlink(missing_ok=True)
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
             raise
 
     def update(
