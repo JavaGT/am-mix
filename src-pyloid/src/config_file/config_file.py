@@ -1,7 +1,8 @@
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Any
-from .types import Config
+from .types import Config, ConfigOption
 
 import yaml
 
@@ -68,29 +69,42 @@ class ConfigFile:
         return self.config_path.exists()
 
     def save(self) -> None:
-        with self.config_path.open("w") as file:
-            yaml.dump(self.json_config, file)
+        temp_path = self.config_path.with_name(self.config_path.name + ".tmp")
+        try:
+            with temp_path.open("w") as file:
+                yaml.dump(self.json_config, file)
+            os.replace(temp_path, self.config_path)
+        except BaseException:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     def update(
         self,
         update: dict[str, Any],
     ) -> None:
+        parsed: dict[str, tuple[ConfigOption, Any]] = {}
         for key, value in update.items():
             if key not in DEFAULT_SETTINGS.__dict__:
                 continue
 
             config_option = DEFAULT_SETTINGS.__dict__[key]
 
-            self.config.__dict__[key] = self._parse_config(
-                key,
-                config_option.is_list,
-                config_option.nullable,
-                config_option.data_type,
-                value,
+            parsed[key] = (
+                config_option,
+                self._parse_config(
+                    key,
+                    config_option.is_list,
+                    config_option.nullable,
+                    config_option.data_type,
+                    value,
+                ),
             )
 
+        for key, (config_option, value) in parsed.items():
+            self.config.__dict__[key] = value
+
             self.json_config[key] = self._serialize_config(
-                self.config.__dict__[key],
+                value,
                 config_option.is_list,
             )
 
@@ -112,10 +126,13 @@ class ConfigFile:
         if value is None:
             return None
 
-        if is_list:
-            return [data_type(item) for item in value]
+        try:
+            if is_list:
+                return [data_type(item) for item in value]
 
-        return data_type(value)
+            return data_type(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid value for {key}: {value!r} ({e})") from e
 
     def _serialize_config(self, value: Any, is_list: bool) -> Any:
         if value is None:
