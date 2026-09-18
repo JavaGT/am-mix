@@ -1,7 +1,9 @@
+import os
+import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import Any
-from .types import Config
+from .types import Config, ConfigOption
 
 import yaml
 
@@ -20,11 +22,21 @@ class ConfigFile:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _initialize_config(self) -> None:
+        self.json_config: dict[str, Any] = {}
         if self.config_path.exists():
-            with self.config_path.open("r") as file:
-                self.json_config = yaml.safe_load(file)
-        else:
-            self.json_config = {}
+            try:
+                with self.config_path.open("r") as file:
+                    self.json_config = yaml.safe_load(file)
+            except yaml.YAMLError as e:
+                self.parse_errors["config.yml"] = e
+            if self.json_config is None:
+                # Empty file: nothing to recover, start from defaults.
+                self.json_config = {}
+            elif not isinstance(self.json_config, dict):
+                self.parse_errors["config.yml"] = ValueError(
+                    "Config file does not contain a key mapping"
+                )
+                self.json_config = {}
 
         self.config = Config()
         for key, default_setting in DEFAULT_SETTINGS.__dict__.items():
@@ -58,29 +70,51 @@ class ConfigFile:
         return self.config_path.exists()
 
     def save(self) -> None:
-        with self.config_path.open("w") as file:
-            yaml.dump(self.json_config, file)
+        fd, temp_name = tempfile.mkstemp(
+            dir=self.config_path.parent,
+            prefix=self.config_path.name + ".",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w") as file:
+                yaml.dump(self.json_config, file)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp_name, self.config_path)
+        except BaseException:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+            raise
 
     def update(
         self,
         update: dict[str, Any],
     ) -> None:
+        parsed: dict[str, tuple[ConfigOption, Any]] = {}
         for key, value in update.items():
             if key not in DEFAULT_SETTINGS.__dict__:
                 continue
 
             config_option = DEFAULT_SETTINGS.__dict__[key]
 
-            self.config.__dict__[key] = self._parse_config(
-                key,
-                config_option.is_list,
-                config_option.nullable,
-                config_option.data_type,
-                value,
+            parsed[key] = (
+                config_option,
+                self._parse_config(
+                    key,
+                    config_option.is_list,
+                    config_option.nullable,
+                    config_option.data_type,
+                    value,
+                ),
             )
 
+        for key, (config_option, value) in parsed.items():
+            self.config.__dict__[key] = value
+
             self.json_config[key] = self._serialize_config(
-                self.config.__dict__[key],
+                value,
                 config_option.is_list,
             )
 
@@ -102,10 +136,13 @@ class ConfigFile:
         if value is None:
             return None
 
-        if is_list:
-            return [data_type(item) for item in value]
+        try:
+            if is_list:
+                return [data_type(item) for item in value]
 
-        return data_type(value)
+            return data_type(value)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid value for {key}: {value!r} ({e})") from e
 
     def _serialize_config(self, value: Any, is_list: bool) -> Any:
         if value is None:
