@@ -20,11 +20,21 @@ class ConfigFile:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _initialize_config(self) -> None:
+        self.json_config: dict[str, Any] = {}
         if self.config_path.exists():
-            with self.config_path.open("r") as file:
-                self.json_config = yaml.safe_load(file)
-        else:
-            self.json_config = {}
+            try:
+                with self.config_path.open("r") as file:
+                    self.json_config = yaml.safe_load(file)
+            except yaml.YAMLError as e:
+                self.parse_errors["config.yml"] = e
+            if self.json_config is None:
+                # Empty file: nothing to recover, start from defaults.
+                self.json_config = {}
+            elif not isinstance(self.json_config, dict):
+                self.parse_errors["config.yml"] = ValueError(
+                    "Config file does not contain a key mapping"
+                )
+                self.json_config = {}
 
         self.config = Config()
         for key, default_setting in DEFAULT_SETTINGS.__dict__.items():
